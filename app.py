@@ -1,30 +1,61 @@
-import streamlit as st import requests from datetime import datetime
+import streamlit as st
+import requests
+from datetime import datetime
+import time
 
-Set up page config
+st.set_page_config(page_title="Omniscience Dashboard", layout="wide")
 
-st.set_page_config(page_title="Omniscience Control Center", layout="wide") st.title("Omniscience MLB Ingestion Dashboard")
+# Visual indicator light for data ingestion status
+status_placeholder = st.empty()
+button_clicked = st.button("📥 Call Data (Manual Ingestion)")
 
-Ingestion status indicator
+# Function to fetch data from the API
+def fetch_odds_data(year_start, year_end):
+    url = "https://v3.football.api-sports.io/odds"
+    headers = {
+        "x-apisports-key": st.secrets["api_sports"]["key"]
+    }
 
-if "ingestion_status" not in st.session_state: st.session_state.ingestion_status = "idle"
+    mlb_competition_id = 1
+    seasons = [
+        {"year": 2022, "from": "2022-02-26", "to": "2022-11-06"},
+        {"year": 2023, "from": "2023-02-24", "to": "2023-11-02"},
+        {"year": 2024, "from": "2024-02-22", "to": "2024-10-31"},
+        {"year": 2025, "from": "2025-03-18", "to": "2025-09-22"},
+    ]
 
-status_color = { "idle": "gray", "loading": "orange", "success": "green", "error": "red" }
+    all_data = []
+    for season in seasons:
+        if season["year"] < year_start or season["year"] > year_end:
+            continue
 
-st.markdown( f""" <div style='width:20px;height:20px;border-radius:50%;background-color:{status_color[st.session_state.ingestion_status]};display:inline-block;margin-right:10px'></div> <span style='font-size:18px'>Ingestion Status: <strong>{st.session_state.ingestion_status.upper()}</strong></span> """, unsafe_allow_html=True )
+        query = {
+            "league": mlb_competition_id,
+            "season": season["year"],
+            "date_from": season["from"],
+            "date_to": season["to"]
+        }
 
-API Key from secrets
+        with st.spinner(f"Fetching {season['year']} odds..."):
+            response = requests.get(url, headers=headers, params=query)
+            if response.status_code == 200:
+                all_data.append(response.json())
+            else:
+                st.error(f"Failed to fetch for {season['year']}: {response.status_code}")
+            time.sleep(1.5)  # avoid rate limits
 
-API_KEY = st.secrets["api_sports_key"] HEADERS = { "x-apisports-key": API_KEY }
+    return all_data
 
-Season data
+# Manual trigger
+if button_clicked:
+    status_placeholder.markdown("🔄 Ingesting data...")
+    data = fetch_odds_data(2022, 2025)
 
-SEASONS = [ {"year": 2022, "from": "2022-02-26", "to": "2022-11-06"}, {"year": 2023, "from": "2023-02-24", "to": "2023-11-02"}, {"year": 2024, "from": "2024-02-22", "to": "2024-10-31"}, {"year": 2025, "from": "2025-03-18", "to": "2025-09-22"}, ]
-
-COMPETITION_ID = 1
-
-Manual ingestion trigger
-
-if st.button("Call Data"): st.session_state.ingestion_status = "loading" try: for season in SEASONS: url = ( f"https://v3.american-api.com/baseball/fixtures?" f"league={COMPETITION_ID}&season={season['year']}" f"&from={season['from']}&to={season['to']}" ) response = requests.get(url, headers=HEADERS) if response.status_code != 200: raise Exception(f"Error in {season['year']} call: {response.status_code}") st.success(f"Ingested season {season['year']}") st.session_state.ingestion_status = "success" except Exception as e: st.session_state.ingestion_status = "error" st.error(f"Ingestion failed: {e}")
-
-st.write("\n---\n") st.markdown("## Next: Add Command Center, Slate Display, and Analysis")
-
+    if data:
+        st.success("✅ Data ingestion completed.")
+        status_placeholder.markdown("🟢 Ready")
+    else:
+        st.error("❌ No data returned.")
+        status_placeholder.markdown("🔴 Failed")
+else:
+    status_placeholder.markdown("🟡 Awaiting ingestion...")
