@@ -1,21 +1,57 @@
 import streamlit as st
+import requests
+from datetime import datetime
 
-st.set_page_config(page_title="Omniscience", layout="wide")
+# App title
+st.set_page_config(page_title="Omniscience Control Center", layout="wide")
+st.title("🧠 Omniscience Sports Betting Dashboard")
 
-st.title("🔮 Omniscience Sports Betting Control Center")
+# 🔐 Securely fetch API key from Streamlit secrets
+API_KEY = st.secrets["api_sports"]["key"]
+BASE_URL = "https://v3.football.api-sports.io"  # Example; update per sport
 
-st.write("Welcome to the Omniscience Model Dashboard. Choose your operation below.")
+# ✅ Status Light Indicator
+status_placeholder = st.empty()
 
-menu = st.selectbox("Select Mode", ["Flag High-Confidence Picks", "Input Betting Lines", "Run Simulation", "View Logs"])
+def show_status(color="yellow", message="Ingesting data..."):
+    status_placeholder.markdown(
+        f"<div style='background-color:{color};padding:10px;border-radius:10px;text-align:center;color:white;font-weight:bold;'>"
+        f"🔄 {message}</div>",
+        unsafe_allow_html=True
+    )
 
-if menu == "Flag High-Confidence Picks":
-    st.success("📌 High-confidence picks will be listed here.")
-elif menu == "Input Betting Lines":
-    st.text_input("Paste today's lines here (or upload file):")
-    st.file_uploader("Upload screenshot or CSV", type=["png", "jpg", "csv"])
-elif menu == "Run Simulation":
-    st.info("Simulations and projections will be generated here.")
-elif menu == "View Logs":
-    st.code("Fetching historical logs and bet tracking...")
+# 🔄 Ingest Data Function
+@st.cache_data(ttl=600)
+def fetch_games():
+    show_status("yellow", "Fetching live data...")
+    headers = {
+        "x-apisports-key": API_KEY
+    }
 
-st.caption("Omniscience v1.0 — Streamlit Deployment")
+    try:
+        # Example endpoint: Today's fixtures (adjust for NBA/MLB/WNBA later)
+        today = datetime.now().strftime('%Y-%m-%d')
+        url = f"{BASE_URL}/games?date={today}"
+
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+
+        show_status("green", "✅ Data ingested successfully.")
+        return data
+    except Exception as e:
+        show_status("red", f"❌ Failed to ingest: {e}")
+        return None
+
+# 🔃 Run ingestion
+games_data = fetch_games()
+
+# 🧠 Command Center UI
+st.subheader("🛠 Command Center")
+
+with st.expander("🔍 Data Preview"):
+    st.write(games_data if games_data else "No data available.")
+
+# ⏳ Placeholder: Add slate rendering, dropdowns, flags here
+st.markdown("---")
+st.info("Slate and betting analysis modules coming next.")
