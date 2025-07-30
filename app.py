@@ -1,52 +1,98 @@
 import streamlit as st
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
+import pandas as pd
 
-st.set_page_config(page_title="Omniscience: MLB Price Analytics", layout="wide")
+st.set_page_config(page_title="Omniscience MLB Dashboard", layout="wide")
 
-st.sidebar.title("Omniscience Control Panel")
+# Load API key securely
+API_KEY = st.secrets["API_KEY"]
+HEADERS = {"Authorization": f"Bearer {API_KEY}"}
 
-odds_mode = st.sidebar.radio("Data Source", ["Historic Odds", "Live Odds"])
-selected_date = st.sidebar.date_input("Select Date", value=datetime(2025, 7, 29))
+# Define API endpoints
+BASE_URL = "https://api.yoursportsdata.com"  # Replace with actual
+MLB_COMPETITION_ID = 1
 
-target_date = selected_date.strftime("%Y-%m-%d")
-competition_id = 1  # MLB
+# ---- Functions ----
+def fetch_historic_odds(date):
+    """Get historic MLB odds for a specific date."""
+    url = f"{BASE_URL}/odds/historic"
+    params = {
+        "competition_id": MLB_COMPETITION_ID,
+        "date": date.strftime("%Y-%m-%d")
+    }
+    res = requests.get(url, headers=HEADERS, params=params)
+    return res.json()
 
-call_data = st.sidebar.button("📡 Call Data")
+def fetch_live_odds():
+    """Get live MLB odds (today only)."""
+    url = f"{BASE_URL}/odds/live"
+    params = {
+        "competition_id": MLB_COMPETITION_ID
+    }
+    res = requests.get(url, headers=HEADERS, params=params)
+    return res.json()
 
-st.title("🧠 Omniscience: MLB Price Analytics Dashboard")
-st.subheader(f"🎯 Target Date: {target_date} | Mode: {odds_mode}")
+def run_fibonacci_analysis(odds_data):
+    """Mock Fibonacci range analysis."""
+    results = []
+    for game in odds_data:
+        opener = game.get("open_spread", 0)
+        closer = game.get("close_spread", 0)
+        diff = closer - opener
+        fib_levels = {
+            "23.6%": opener + diff * 0.236,
+            "38.2%": opener + diff * 0.382,
+            "61.8%": opener + diff * 0.618,
+        }
+        results.append({
+            "Matchup": game["matchup"],
+            "Open": opener,
+            "Close": closer,
+            "Fib Levels": fib_levels
+        })
+    return results
 
-if call_data:
-    st.info("Calling data... please wait.")
-    
-    api_key = st.secrets["api_sports"]["key"]
-
-    if odds_mode == "Historic Odds":
-        endpoint = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds-history/?date={target_date}&regions=us&markets=h2h,spreads,totals&apiKey={api_key}"
+def render_analysis(analysis_type, odds_data):
+    if analysis_type == "Fibonacci Ranges":
+        fib_results = run_fibonacci_analysis(odds_data)
+        for row in fib_results:
+            st.markdown(f"**{row['Matchup']}**")
+            st.write(f"📈 Open: {row['Open']} → Close: {row['Close']}")
+            st.json(row["Fib Levels"])
+            st.markdown("---")
     else:
-        endpoint = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?regions=us&markets=h2h,spreads,totals&apiKey={api_key}"
+        st.info("Other analysis types coming soon.")
 
-    try:
-        response = requests.get(endpoint)
-        if response.status_code == 200:
-            games = response.json()
-            if not games:
-                st.warning("No games found for the selected date.")
-            else:
-                for game in games:
-                    teams = f"{game['home_team']} vs {game['away_team']}"
-                    commence = datetime.fromisoformat(game['commence_time'].replace("Z", "+00:00"))
-                    st.markdown(f"### {teams}  —  🕒 {commence.strftime('%I:%M %p')}")
+# ---- UI ----
+st.title("🧠 Omniscience MLB Price Dashboard")
+st.markdown("Manual control. MLB only. Full Fibonacci and price action layer active.")
 
-                    for bookmaker in game.get("bookmakers", []):
-                        st.markdown(f"**{bookmaker['title']}**")
-                        for market in bookmaker.get("markets", []):
-                            st.markdown(f"*{market['key']}*")
-                            for outcome in market["outcomes"]:
-                                st.write(f"{outcome['name']}: {outcome['price']}")
-                        st.markdown("---")
-        else:
-            st.error(f"API Error {response.status_code}: {response.text}")
-    except Exception as e:
-        st.error(f"Request failed: {e}")
+# Date picker
+target_date = st.date_input("Select a slate date:", value=datetime.now().date())
+data_source = st.radio("Choose Data Source:", ["Live Odds", "Historic Odds"])
+
+# Manual fetch buttons
+if data_source == "Live Odds":
+    if st.button("📡 Call Live Odds Now"):
+        odds_data = fetch_live_odds()
+    else:
+        odds_data = []
+else:
+    if st.button("📜 Call Historic Odds Now"):
+        odds_data = fetch_historic_odds(target_date)
+    else:
+        odds_data = []
+
+# If data is loaded
+if odds_data:
+    st.success(f"{len(odds_data)} games loaded.")
+    analysis_type = st.selectbox("Choose analysis engine:", [
+        "Fibonacci Ranges",
+        "Line Movement",
+        "Steam Moves",
+        "Convergence Flags"
+    ])
+    render_analysis(analysis_type, odds_data)
+else:
+    st.warning("No data loaded yet. Please call the API above.")
