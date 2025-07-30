@@ -1,61 +1,52 @@
 import streamlit as st
 import requests
 from datetime import datetime
-import time
 
-st.set_page_config(page_title="Omniscience Dashboard", layout="wide")
+st.set_page_config(page_title="Omniscience: MLB Price Analytics", layout="wide")
 
-# Visual indicator light for data ingestion status
-status_placeholder = st.empty()
-button_clicked = st.button("📥 Call Data (Manual Ingestion)")
+st.sidebar.title("Omniscience Control Panel")
 
-# Function to fetch data from the API
-def fetch_odds_data(year_start, year_end):
-    url = "https://v3.football.api-sports.io/odds"
-    headers = {
-        "x-apisports-key": st.secrets["api_sports"]["key"]
-    }
+odds_mode = st.sidebar.radio("Data Source", ["Historic Odds", "Live Odds"])
+selected_date = st.sidebar.date_input("Select Date", value=datetime(2025, 7, 29))
 
-    mlb_competition_id = 1
-    seasons = [
-        {"year": 2022, "from": "2022-02-26", "to": "2022-11-06"},
-        {"year": 2023, "from": "2023-02-24", "to": "2023-11-02"},
-        {"year": 2024, "from": "2024-02-22", "to": "2024-10-31"},
-        {"year": 2025, "from": "2025-03-18", "to": "2025-09-22"},
-    ]
+target_date = selected_date.strftime("%Y-%m-%d")
+competition_id = 1  # MLB
 
-    all_data = []
-    for season in seasons:
-        if season["year"] < year_start or season["year"] > year_end:
-            continue
+call_data = st.sidebar.button("📡 Call Data")
 
-        query = {
-            "league": mlb_competition_id,
-            "season": season["year"],
-            "date_from": season["from"],
-            "date_to": season["to"]
-        }
+st.title("🧠 Omniscience: MLB Price Analytics Dashboard")
+st.subheader(f"🎯 Target Date: {target_date} | Mode: {odds_mode}")
 
-        with st.spinner(f"Fetching {season['year']} odds..."):
-            response = requests.get(url, headers=headers, params=query)
-            if response.status_code == 200:
-                all_data.append(response.json())
-            else:
-                st.error(f"Failed to fetch for {season['year']}: {response.status_code}")
-            time.sleep(1.5)  # avoid rate limits
+if call_data:
+    st.info("Calling data... please wait.")
+    
+    api_key = st.secrets["api_sports"]["key"]
 
-    return all_data
-
-# Manual trigger
-if button_clicked:
-    status_placeholder.markdown("🔄 Ingesting data...")
-    data = fetch_odds_data(2022, 2025)
-
-    if data:
-        st.success("✅ Data ingestion completed.")
-        status_placeholder.markdown("🟢 Ready")
+    if odds_mode == "Historic Odds":
+        endpoint = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds-history/?date={target_date}&regions=us&markets=h2h,spreads,totals&apiKey={api_key}"
     else:
-        st.error("❌ No data returned.")
-        status_placeholder.markdown("🔴 Failed")
-else:
-    status_placeholder.markdown("🟡 Awaiting ingestion...")
+        endpoint = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?regions=us&markets=h2h,spreads,totals&apiKey={api_key}"
+
+    try:
+        response = requests.get(endpoint)
+        if response.status_code == 200:
+            games = response.json()
+            if not games:
+                st.warning("No games found for the selected date.")
+            else:
+                for game in games:
+                    teams = f"{game['home_team']} vs {game['away_team']}"
+                    commence = datetime.fromisoformat(game['commence_time'].replace("Z", "+00:00"))
+                    st.markdown(f"### {teams}  —  🕒 {commence.strftime('%I:%M %p')}")
+
+                    for bookmaker in game.get("bookmakers", []):
+                        st.markdown(f"**{bookmaker['title']}**")
+                        for market in bookmaker.get("markets", []):
+                            st.markdown(f"*{market['key']}*")
+                            for outcome in market["outcomes"]:
+                                st.write(f"{outcome['name']}: {outcome['price']}")
+                        st.markdown("---")
+        else:
+            st.error(f"API Error {response.status_code}: {response.text}")
+    except Exception as e:
+        st.error(f"Request failed: {e}")
