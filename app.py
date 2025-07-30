@@ -1,98 +1,104 @@
 import streamlit as st
 import requests
-from datetime import datetime, timedelta
 import pandas as pd
+from datetime import datetime
+import time
 
-st.set_page_config(page_title="Omniscience MLB Dashboard", layout="wide")
-
-# Load API key securely
+# Load API key securely from Streamlit secrets
 API_KEY = st.secrets["API_KEY"]
-HEADERS = {"Authorization": f"Bearer {API_KEY}"}
 
-# Define API endpoints
-BASE_URL = "https://api.yoursportsdata.com"  # Replace with actual
-MLB_COMPETITION_ID = 1
+# Title
+st.set_page_config(page_title="Omniscience Price Engine", layout="wide")
+st.title("⚾ Omniscience MLB Price Intelligence")
 
-# ---- Functions ----
-def fetch_historic_odds(date):
-    """Get historic MLB odds for a specific date."""
-    url = f"{BASE_URL}/odds/historic"
-    params = {
-        "competition_id": MLB_COMPETITION_ID,
-        "date": date.strftime("%Y-%m-%d")
+# Sidebar controls
+st.sidebar.header("🔌 Data Source Controls")
+data_mode = st.sidebar.radio("Select Data Type", ["Historic Odds", "Live Odds"])
+date_input = st.sidebar.date_input("Target Date", datetime.today()).strftime("%Y-%m-%d")
+
+trigger = st.sidebar.button("📡 Call Data")
+
+# Placeholder for results
+status_box = st.empty()
+result_box = st.container()
+
+# --- Define analysis functions ---
+def get_data(data_mode, date):
+    if data_mode == "Historic Odds":
+        url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds-history/?regions=us&date={date}&apikey={API_KEY}"
+    else:
+        url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?regions=us&markets=h2h,spreads,totals&date={date}&apikey={API_KEY}"
+    response = requests.get(url)
+    if response.status_code != 200:
+        raise ValueError(f"API Error {response.status_code}: {response.text}")
+    return response.json()
+
+def fib_levels(high, low):
+    diff = high - low
+    return {
+        "0.0%": high,
+        "23.6%": high - 0.236 * diff,
+        "38.2%": high - 0.382 * diff,
+        "50.0%": high - 0.5 * diff,
+        "61.8%": high - 0.618 * diff,
+        "78.6%": high - 0.786 * diff,
+        "100.0%": low,
     }
-    res = requests.get(url, headers=HEADERS, params=params)
-    return res.json()
 
-def fetch_live_odds():
-    """Get live MLB odds (today only)."""
-    url = f"{BASE_URL}/odds/live"
-    params = {
-        "competition_id": MLB_COMPETITION_ID
-    }
-    res = requests.get(url, headers=HEADERS, params=params)
-    return res.json()
+def apply_fibonacci(df):
+    fib_results = []
+    for _, row in df.iterrows():
+        try:
+            prices = [float(row['home_price']), float(row['away_price'])]
+            high = max(prices)
+            low = min(prices)
+            fib = fib_levels(high, low)
+            fib_results.append({**row, **fib})
+        except:
+            continue
+    return pd.DataFrame(fib_results)
 
-def run_fibonacci_analysis(odds_data):
-    """Mock Fibonacci range analysis."""
-    results = []
-    for game in odds_data:
-        opener = game.get("open_spread", 0)
-        closer = game.get("close_spread", 0)
-        diff = closer - opener
-        fib_levels = {
-            "23.6%": opener + diff * 0.236,
-            "38.2%": opener + diff * 0.382,
-            "61.8%": opener + diff * 0.618,
-        }
-        results.append({
-            "Matchup": game["matchup"],
-            "Open": opener,
-            "Close": closer,
-            "Fib Levels": fib_levels
-        })
-    return results
+def oscillator(df):
+    df["avg_price"] = (df["home_price"] + df["away_price"]) / 2
+    df["oscillator"] = df["avg_price"].rolling(window=3).mean() - df["avg_price"].rolling(window=6).mean()
+    return df
 
-def render_analysis(analysis_type, odds_data):
-    if analysis_type == "Fibonacci Ranges":
-        fib_results = run_fibonacci_analysis(odds_data)
-        for row in fib_results:
-            st.markdown(f"**{row['Matchup']}**")
-            st.write(f"📈 Open: {row['Open']} → Close: {row['Close']}")
-            st.json(row["Fib Levels"])
-            st.markdown("---")
-    else:
-        st.info("Other analysis types coming soon.")
+# --- On Trigger ---
+if trigger:
+    try:
+        status_box.info("⏳ Fetching and analyzing data...")
+        raw_data = get_data(data_mode, date_input)
 
-# ---- UI ----
-st.title("🧠 Omniscience MLB Price Dashboard")
-st.markdown("Manual control. MLB only. Full Fibonacci and price action layer active.")
+        extracted = []
+        for game in raw_data:
+            home = game.get("home_team", "NA")
+            away = game.get("away_team", "NA")
+            for bookmaker in game.get("bookmakers", []):
+                for market in bookmaker.get("markets", []):
+                    if market["key"] == "h2h":
+                        try:
+                            prices = {o["name"]: o["price"] for o in market["outcomes"]}
+                            extracted.append({
+                                "matchup": f"{away} @ {home}",
+                                "home_team": home,
+                                "away_team": away,
+                                "book": bookmaker["title"],
+                                "home_price": prices.get(home, None),
+                                "away_price": prices.get(away, None),
+                                "last_update": market["last_update"]
+                            })
+                        except:
+                            continue
 
-# Date picker
-target_date = st.date_input("Select a slate date:", value=datetime.now().date())
-data_source = st.radio("Choose Data Source:", ["Live Odds", "Historic Odds"])
+        df = pd.DataFrame(extracted)
+        df = df.dropna(subset=["home_price", "away_price"])
 
-# Manual fetch buttons
-if data_source == "Live Odds":
-    if st.button("📡 Call Live Odds Now"):
-        odds_data = fetch_live_odds()
-    else:
-        odds_data = []
-else:
-    if st.button("📜 Call Historic Odds Now"):
-        odds_data = fetch_historic_odds(target_date)
-    else:
-        odds_data = []
+        df = apply_fibonacci(df)
+        df = oscillator(df)
 
-# If data is loaded
-if odds_data:
-    st.success(f"{len(odds_data)} games loaded.")
-    analysis_type = st.selectbox("Choose analysis engine:", [
-        "Fibonacci Ranges",
-        "Line Movement",
-        "Steam Moves",
-        "Convergence Flags"
-    ])
-    render_analysis(analysis_type, odds_data)
-else:
-    st.warning("No data loaded yet. Please call the API above.")
+        result_box.subheader("📊 Price Analysis Engine Output")
+        st.dataframe(df.style.format(subset=["home_price", "away_price", "oscillator"], formatter="{:.2f}"))
+
+        status_box.success(f"✅ {len(df)} matchups analyzed for {date_input}")
+    except Exception as e:
+        status_box.error(f"⚠️ Error: {str(e)}")
