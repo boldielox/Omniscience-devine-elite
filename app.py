@@ -1,120 +1,59 @@
 import streamlit as st
 import requests
-from datetime import datetime, timedelta
-import time
+from datetime import datetime
 
-st.set_page_config(page_title="Omniscience MLB Dashboard", layout="wide")
+st.set_page_config(page_title="Omniscience MLB Odds Dashboard", layout="wide")
 
-API_KEY = st.secrets["API_KEY"]
-API_BASE = "https://v1.baseball.api-sports.io/"
+API_KEY = st.secrets["api_sports"]["key"]
 
-# Headers for API requests
-HEADERS = {
-    "x-apisports-key": API_KEY
-}
+st.title("Omniscience MLB Odds Dashboard")
 
-# Visual status placeholder
-status_placeholder = st.empty()
+# Date input for the slate (default to today)
+game_date = st.date_input("Select game date", datetime.today())
 
-# --- Sidebar controls ---
-st.sidebar.title("Controls")
+# Dropdown for analysis type (expand as you build more)
+analysis_type = st.selectbox("Select Analysis Type", ["Price Analytics", "Fibonacci Analysis", "Other (coming soon)"])
 
-date_selected = st.sidebar.date_input(
-    "Select Date to View Slate",
-    value=datetime.today()
-)
+# Manual trigger button
+if st.button("Fetch MLB Odds Data"):
+    with st.spinner("Fetching MLB odds data..."):
+        url = "https://v3.baseball.api-sports.io/odds"
+        headers = {"x-apisports-key": API_KEY}
+        params = {"date": game_date.strftime("%Y-%m-%d")}
 
-analysis_type = st.sidebar.selectbox(
-    "Select Analysis Type",
-    options=["None", "Fibonacci Retracement", "Price Movement", "Oscillators"]
-)
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            # Basic sanity check
+            if data.get("response"):
+                st.success(f"Fetched {len(data['response'])} games for {game_date}")
+                
+                # Display simple table of games and odds (example)
+                games = []
+                for game in data["response"]:
+                    fixture = game["fixture"]
+                    teams = game["teams"]
+                    bookmakers = game.get("bookmakers", [])
+                    # Show matchup and first bookmaker's moneyline odds if available
+                    if bookmakers:
+                        odds = bookmakers[0]["markets"][0]["outcomes"]
+                        ml_teams = {o["name"]: o["price"] for o in odds}
+                        games.append({
+                            "Home": teams["home"]["name"],
+                            "Away": teams["away"]["name"],
+                            "Home ML": ml_teams.get(teams["home"]["name"], "N/A"),
+                            "Away ML": ml_teams.get(teams["away"]["name"], "N/A"),
+                            "Date": fixture["date"][:10]
+                        })
+                st.table(games)
 
-call_type = st.sidebar.radio(
-    "Select Data Call Type",
-    options=["Historical Odds", "Live Odds"]
-)
-
-fetch_button = st.sidebar.button("📥 Fetch Data")
-
-# Function to fetch MLB odds for a date (historical or live)
-def fetch_odds(date_str, call_type):
-    if call_type == "Historical Odds":
-        # Historical odds require league & season - using MLB league id=1 & season year
-        year = int(date_str[:4])
-        url = f"{API_BASE}odds"
-        params = {
-            "league": 1,
-            "season": year,
-            "date": date_str
-        }
-    else:
-        # Live odds call, no season param
-        url = f"{API_BASE}odds"
-        params = {
-            "league": 1,
-            "date": date_str
-        }
-    try:
-        response = requests.get(url, headers=HEADERS, params=params, timeout=10)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        st.error(f"API request failed: {e}")
-        return None
-
-# Analysis placeholders — implement your Fibonacci & other logic here
-def analyze_odds(odds_data, analysis_type):
-    if not odds_data or "response" not in odds_data:
-        return "No odds data to analyze."
-
-    games = odds_data["response"]
-    analysis_results = []
-
-    # Placeholder example: just list game matchups and odds
-    for game in games:
-        teams = f"{game['teams']['home']['name']} vs {game['teams']['away']['name']}"
-        try:
-            odds = game["bookmakers"][0]["markets"][0]["outcomes"]
-            odds_str = ", ".join([f"{o['name']}: {o['price']}" for o in odds])
-        except (IndexError, KeyError):
-            odds_str = "Odds unavailable"
-        analysis_results.append(f"Game: {teams}\nOdds: {odds_str}")
-
-    # Dummy explanation - replace with Fibonacci etc logic
-    explanation = f"Analysis Type: {analysis_type}\n\n" + "\n\n".join(analysis_results)
-    return explanation
-
-# --- Main UI ---
-st.title("Omniscience MLB Dashboard")
-
-if fetch_button:
-    status_placeholder.info("🔄 Fetching data...")
-    date_str = date_selected.strftime("%Y-%m-%d")
-    data = fetch_odds(date_str, call_type)
-
-    if data:
-        status_placeholder.success(f"✅ Data fetched for {date_str} ({call_type})")
-
-        st.subheader(f"MLB Games on {date_str}")
-        if data["response"]:
-            for game in data["response"]:
-                st.markdown(f"**{game['teams']['home']['name']}** vs **{game['teams']['away']['name']}**")
-                st.write(f"Date/Time: {game['fixture']['date']}")
-                # Show odds from first bookmaker if available
-                try:
-                    odds = game["bookmakers"][0]["markets"][0]["outcomes"]
-                    odds_display = ", ".join([f"{o['name']}: {o['price']}" for o in odds])
-                    st.write(f"Odds: {odds_display}")
-                except (IndexError, KeyError):
-                    st.write("Odds: Unavailable")
-                st.write("---")
+                # Show analysis placeholder
+                st.markdown(f"### Analysis: {analysis_type}")
+                st.info("Analysis engine coming soon — this will show Fibonacci retracement and price analytics based on odds data.")
+            else:
+                st.error("No games found for this date.")
         else:
-            st.warning("No games found for this date.")
+            st.error(f"API error: {response.status_code} - {response.text}")
 
-        st.subheader("Analysis & Explanation")
-        explanation_text = analyze_odds(data, analysis_type)
-        st.text_area("Details", explanation_text, height=300)
-    else:
-        status_placeholder.error("❌ Failed to fetch data.")
 else:
-    status_placeholder.info("🟡 Waiting for manual data fetch...")
+    st.info("Select a date and analysis type, then press the button to fetch data.")
