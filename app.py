@@ -85,20 +85,7 @@ if "games_df" in st.session_state:
         """)
         st.markdown("---")
 
-    st.success("You can now expand with FIB flags, run line/value logic, pitcher ratings, etc.")
+    
 
----
 
-### ✅ Next Steps
 
-1. Confirm if you are running this **locally** or in **Streamlit Cloud / Docker**.
-2. If you're on Streamlit Cloud and getting `ConnectionError`, verify **outbound access** is allowed.
-3. Let me know which exact model/flagging logic to embed next:
-   - FIB flagging
-   - Value bet detection
-   - Player props breakdown
-   - Team matchup projections
-   - Confidence tiering
-   - “Omniscience Verified” tag logic
-
-I’ll stack all of that on top, but now the base dashboard + data ingest system is working correctly with your `secrets.toml`.
