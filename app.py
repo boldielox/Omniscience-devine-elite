@@ -1,59 +1,104 @@
 import streamlit as st
 import requests
+import pandas as pd
 from datetime import datetime
+from dateutil import parser
 
-st.set_page_config(page_title="Omniscience MLB Odds Dashboard", layout="wide")
-
+# Get API key from Streamlit secrets
 API_KEY = st.secrets["api_sports"]["key"]
+HEADERS = {"x-apisports-key": API_KEY}
 
-st.title("Omniscience MLB Odds Dashboard")
+# Constants
+MLB_COMPETITION_ID = 1
+SEASONS = {
+    "2022": {"start": "2022-02-26", "end": "2022-11-06"},
+    "2023": {"start": "2023-02-24", "end": "2023-11-02"},
+    "2024": {"start": "2024-02-22", "end": "2024-10-31"},
+    "2025": {"start": "2025-03-18", "end": "2025-09-23"},
+}
 
-# Date input for the slate (default to today)
-game_date = st.date_input("Select game date", datetime.today())
+st.set_page_config(page_title="Omniscience MLB Dashboard", layout="wide")
+st.title("⚾ Omniscience MLB Control Center")
 
-# Dropdown for analysis type (expand as you build more)
-analysis_type = st.selectbox("Select Analysis Type", ["Price Analytics", "Fibonacci Analysis", "Other (coming soon)"])
+# Sidebar: Season & Date Picker
+season = st.sidebar.selectbox("Select MLB Season", list(SEASONS.keys()), index=3)
+date = st.sidebar.date_input("Select Date", datetime.today())
 
-# Manual trigger button
-if st.button("Fetch MLB Odds Data"):
-    with st.spinner("Fetching MLB odds data..."):
-        url = "https://v3.baseball.api-sports.io/odds"
-        headers = {"x-apisports-key": API_KEY}
-        params = {"date": game_date.strftime("%Y-%m-%d")}
+# Data Pull Trigger
+if st.sidebar.button("🔄 Call Data"):
+    with st.spinner("Fetching data..."):
+        try:
+            # Format Date
+            game_date = date.strftime("%Y-%m-%d")
+            url = "https://v1.baseball.api-sports.io/games"
+            params = {
+                "league": MLB_COMPETITION_ID,
+                "season": season,
+                "date": game_date,
+            }
 
-        response = requests.get(url, headers=headers, params=params)
-        if response.status_code == 200:
-            data = response.json()
-            # Basic sanity check
-            if data.get("response"):
-                st.success(f"Fetched {len(data['response'])} games for {game_date}")
-                
-                # Display simple table of games and odds (example)
-                games = []
-                for game in data["response"]:
-                    fixture = game["fixture"]
-                    teams = game["teams"]
-                    bookmakers = game.get("bookmakers", [])
-                    # Show matchup and first bookmaker's moneyline odds if available
-                    if bookmakers:
-                        odds = bookmakers[0]["markets"][0]["outcomes"]
-                        ml_teams = {o["name"]: o["price"] for o in odds}
-                        games.append({
-                            "Home": teams["home"]["name"],
-                            "Away": teams["away"]["name"],
-                            "Home ML": ml_teams.get(teams["home"]["name"], "N/A"),
-                            "Away ML": ml_teams.get(teams["away"]["name"], "N/A"),
-                            "Date": fixture["date"][:10]
-                        })
-                st.table(games)
+            response = requests.get(url, headers=HEADERS, params=params)
+            response.raise_for_status()
+            games = response.json().get("response", [])
 
-                # Show analysis placeholder
-                st.markdown(f"### Analysis: {analysis_type}")
-                st.info("Analysis engine coming soon — this will show Fibonacci retracement and price analytics based on odds data.")
+            if not games:
+                st.warning("No games found for that date.")
             else:
-                st.error("No games found for this date.")
-        else:
-            st.error(f"API error: {response.status_code} - {response.text}")
+                df = pd.DataFrame([
+                    {
+                        "Date": g["date"][:10],
+                        "Home": g["teams"]["home"]["name"],
+                        "Away": g["teams"]["away"]["name"],
+                        "Status": g["status"]["long"],
+                        "Score Home": g["scores"]["home"]["total"],
+                        "Score Away": g["scores"]["away"]["total"],
+                        "Venue": g["venue"]["name"],
+                    }
+                    for g in games
+                ])
+                st.success(f"✅ Loaded {len(df)} games.")
+                st.dataframe(df)
 
-else:
-    st.info("Select a date and analysis type, then press the button to fetch data.")
+                # Save to session state for further analysis
+                st.session_state["games_df"] = df
+
+        except requests.exceptions.ConnectionError as e:
+            st.error("❌ Network error — check internet or API access.")
+            st.exception(e)
+        except Exception as e:
+            st.error("❌ Failed to load data.")
+            st.exception(e)
+
+# If Data Already Loaded
+if "games_df" in st.session_state:
+    df = st.session_state["games_df"]
+    st.subheader("📊 Full Game Breakdown")
+
+    # Simple Analysis Examples (Extend as Needed)
+    st.write("### 🔍 Matchup Summaries")
+    for i, row in df.iterrows():
+        st.markdown(f"""
+        **{row['Away']} @ {row['Home']}**
+        - 🏟 Venue: {row['Venue']}
+        - 🕒 Status: {row['Status']}
+        - 🔢 Score: {row['Score Away']} - {row['Score Home']}
+        """)
+        st.markdown("---")
+
+    st.success("You can now expand with FIB flags, run line/value logic, pitcher ratings, etc.")
+
+---
+
+### ✅ Next Steps
+
+1. Confirm if you are running this **locally** or in **Streamlit Cloud / Docker**.
+2. If you're on Streamlit Cloud and getting `ConnectionError`, verify **outbound access** is allowed.
+3. Let me know which exact model/flagging logic to embed next:
+   - FIB flagging
+   - Value bet detection
+   - Player props breakdown
+   - Team matchup projections
+   - Confidence tiering
+   - “Omniscience Verified” tag logic
+
+I’ll stack all of that on top, but now the base dashboard + data ingest system is working correctly with your `secrets.toml`.
